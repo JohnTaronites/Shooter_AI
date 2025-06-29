@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Kosmiczny Strzelec 1.07</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    canvas {
+      display: block;
+      margin: auto;
+      background: black;
+      touch-action: none;
+    }
+
+    #hud {
+      text-align: center;
+      margin-top: 5px;
+      font-size: 16px;
+    }
+
+    #startButton {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 20px 40px;
+      font-size: 24px;
+      background-color: green;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div>Wynik: <span id="score">0</span> | Życia: <span id="lives">3</span> | Mega Wystrzały: <span id="mega">2</span></div>
+  </div>
+  <canvas id="gameCanvas" width="400" height="700"></canvas>
+
+  <button id="startButton">Graj!</button>
+
+  <audio id="shootSound" src="laser_shoot.wav" preload="auto"></audio>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const startButton = document.getElementById("startButton");
+
+    let playerSize = 48;
+    let playerX = canvas.width / 2 - playerSize / 2;
+    let playerY = canvas.height - playerSize - 2;
+    let score = 0;
+    let lives = 3;
+    let megaShots = 2;
+    let gameOver = false;
+
+    const bullets = [];
+    const enemies = [];
+
+    const shipImage = new Image();
+    shipImage.src = "https://i.imgur.com/goYityG.png";
+
+    const shootSound = document.getElementById("shootSound");
+
+    function drawPlayer() {
+      ctx.drawImage(shipImage, playerX, playerY, playerSize, playerSize);
+    }
+
+    function drawEnemy(e) {
+      ctx.drawImage(shipImage, e.x, e.y, e.size, e.size);
+    }
+
+    function drawBullet(b) {
+      ctx.fillStyle = b.isMega ? "red" : "white";
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+
+    function spawnEnemy() {
+      let size = 48;
+      let x = Math.random() * (canvas.width - size);
+      enemies.push({ x: x, y: -size, size: size });
+    }
+
+    function playShootSound() {
+        // Zawsze próbujemy odtworzyć dźwięk
+        if (shootSound.readyState >= 2) { // Sprawdź, czy dźwięk jest już wystarczająco załadowany (HAVE_CURRENT_DATA lub więcej)
+            shootSound.currentTime = 0;
+            shootSound.play().catch(e => {
+                console.warn("Problem z odtworzeniem dźwięku po inicjalizacji:", e);
+            });
+        } else {
+            console.log("Dźwięk nie jest jeszcze gotowy do odtwarzania.");
+        }
+    }
+
+    function shootBullet() {
+      playShootSound();
+
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          bullets.push({
+            x: playerX + playerSize / 2 - 2,
+            y: playerY,
+            w: 4,
+            h: 10,
+            speed: 6,
+            isMega: false
+          });
+        }, i * 100);
+      }
+    }
+
+    function shootMegaBullet() {
+      if (megaShots <= 0) return;
+      megaShots--;
+      document.getElementById("mega").textContent = megaShots;
+
+      playShootSound();
+
+      const numBullets = 25;
+      const spread = 1.2;
+      for (let i = 0; i < numBullets; i++) {
+        const angle = (-spread / 2) + (spread * (i / (numBullets - 1)));
+        bullets.push({
+          x: playerX + playerSize / 2,
+          y: playerY,
+          w: 4,
+          h: 12,
+          speed: 8,
+          dx: Math.sin(angle) * 5,
+          dy: -Math.cos(angle) * 8,
+          isMega: true
+        });
+      }
+    }
+
+    let touchStartX = null;
+    let holdTimer = null;
+
+    canvas.addEventListener("touchstart", function (e) {
+      touchStartX = e.touches[0].clientX;
+      const touchX = e.touches[0].clientX;
+
+      if (Math.abs(touchX - playerX - playerSize / 2) > 10) {
+        playerX = touchX - playerSize / 2;
+        if (playerX < 0) playerX = 0;
+        if (playerX > canvas.width - playerSize) playerX = canvas.width - playerSize;
+      }
+
+      holdTimer = setTimeout(() => {
+        shootMegaBullet();
+        holdTimer = null;
+      }, 1000);
+    });
+
+    canvas.addEventListener("touchend", function () {
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        shootBullet();
+        holdTimer = null;
+      }
+    });
+
+    canvas.addEventListener("touchmove", function (e) {
+      const touchX = e.touches[0].clientX;
+      const deltaX = touchX - touchStartX;
+      playerX += deltaX;
+      if (playerX < 0) playerX = 0;
+      if (playerX > canvas.width - playerSize) playerX = canvas.width - playerSize;
+      touchStartX = touchX;
+    });
+
+    function updateGame() {
+      if (gameOver) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPlayer();
+
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        let b = bullets[i];
+        if (b.isMega) {
+          b.x += b.dx;
+          b.y += b.dy;
+        } else {
+          b.y -= b.speed;
+        }
+        drawBullet(b);
+        if (b.y < -20 || b.x < -10 || b.x > canvas.width + 10) bullets.splice(i, 1);
+      }
+
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        let e = enemies[i];
+        e.y += 2;
+        drawEnemy(e);
+
+        for (let j = bullets.length - 1; j >= 0; j--) {
+          let b = bullets[j];
+          if (
+            b.x < e.x + e.size &&
+            b.x + b.w > e.x &&
+            b.y < e.y + e.size &&
+            b.y + b.h > e.y
+          ) {
+            enemies.splice(i, 1);
+            if (!b.isMega) bullets.splice(j, 1);
+            score++;
+            document.getElementById("score").textContent = score;
+            break;
+          }
+        }
+
+        if (e.y > canvas.height) {
+          enemies.splice(i, 1);
+          lives--;
+          document.getElementById("lives").textContent = lives;
+          if (lives <= 0) {
+            gameOver = true;
+            setTimeout(() => {
+              ctx.fillStyle = "white";
+              ctx.font = "32px sans-serif";
+              ctx.fillText("😢 Game Over", canvas.width / 2 - 100, canvas.height / 2);
+            }, 200);
+          }
+        }
+      }
+    }
+
+    function startGame() {
+        startButton.style.display = 'none';
+
+        // Rozpoczynamy ładowanie dźwięku, jeśli jeszcze się nie załadował
+        shootSound.load();
+
+        // Próbujemy odtworzyć dźwięk natychmiast po kliknięciu
+        // Jeśli się powiedzie, zatrzymujemy go od razu i resetujemy.
+        // To jest kluczowe dla iOS.
+        shootSound.play().then(() => {
+            shootSound.pause();
+            shootSound.currentTime = 0;
+            console.log("Dźwięk został pomyślnie odblokowany.");
+        }).catch(e => {
+            console.warn("Nie udało się odtworzyć dźwięku przy starcie, gra rozpocznie się bez dźwięku:", e);
+        }).finally(() => {
+            // Niezależnie od sukcesu/porażki odtwarzania, uruchamiamy grę.
+            setInterval(updateGame, 1000 / 60);
+            setInterval(spawnEnemy, 1200);
+        });
+    }
+
+    startButton.addEventListener('click', startGame);
+
+    // Dodatkowy nasłuchiwacz na 'canplaythrough' dla pewności
+    // To zdarzenie oznacza, że plik jest wystarczająco załadowany, by odtworzyć go do końca
+    shootSound.addEventListener('canplaythrough', () => {
+        console.log("Dźwięk jest gotowy do odtwarzania.");
+    });
+
+    // Sprawdź stan błędu dla elementu audio
+    shootSound.addEventListener('error', (e) => {
+        console.error("Błąd ładowania dźwięku:", e);
+        // Sprawdź event.target.error.code dla konkretnych błędów
+        // np. MEDIA_ERR_SRC_NOT_SUPPORTED (4) - problem z formatem/kodekiem
+    });
+  </script>
+</body>
+</html>
