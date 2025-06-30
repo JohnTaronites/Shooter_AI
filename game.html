@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Kosmiczny Strzelec 1.09</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: sans-serif;
+      user-select: none; /* Zapobiega zaznaczaniu tekstu */
+      -webkit-user-select: none; /* Dla przeglądarek WebKit (Chrome, Safari) */
+      -moz-user-select: none; /* Dla Firefox */
+      -ms-user-select: none; /* Dla Internet Explorer/Edge */
+      -webkit-touch-callout: none; /* Zapobiega wyświetlaniu menu kontekstowego na iOS */
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      margin: auto;
+      background: black;
+      touch-action: none;
+    }
+
+    #hud {
+      text-align: center;
+      margin-top: 5px;
+      font-size: 16px;
+    }
+
+    #newGameBtn {
+      display: none;
+      background: white;
+      color: black;
+      font-weight: bold;
+      border: none;
+      padding: 12px 24px;
+      font-size: 18px;
+      cursor: pointer;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      top: calc(50% + 40px);
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div>
+      Wynik: <span id="score">0</span> | Życia: <span id="lives">3</span> | Mega Wystrzały: <span id="mega">2</span>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas" width="400" height="700"></canvas>
+  <button id="newGameBtn" onclick="restartGame()">NOWA GRA</button>
+
+  <audio id="crashSound" src="https://johntaronites.github.io/Shooter_AI/craaash.wav" preload="auto"></audio>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    
+    const crashSound = document.getElementById("crashSound");
+
+    const shipImage = new Image();
+    shipImage.src = "https://i.imgur.com/goYityG.png";
+
+    let playerSize, playerX, playerY;
+    let score, lives, megaShots, gameOver;
+    let bullets, enemies, escapedEnemies;
+
+    // Używamy osobnych flag dla klarowności
+    let webAudioReady = false; // Czy Web Audio API (dla strzału) jest gotowe
+    let htmlAudioReady = false; // Czy HTML Audio (dla crashSound) jest gotowe
+
+    // --- Web Audio API dla dźwięku strzału ---
+    let audioContext = null; // Inicjalizujemy jako null
+    let shootSoundBuffer = null; 
+
+    async function loadAudio(url) {
+      // Funkcja tworząca/wznawiająca kontekst audio
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContext.state === 'suspended') {
+          await audioContext.resume(); // Kluczowe dla aktywacji kontekstu
+          console.log("AudioContext wznowiony.");
+      }
+
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      return await audioContext.decodeAudioData(arrayBuffer);
+    }
+
+    // Funkcja do odtwarzania dźwięku strzału za pomocą Web Audio API
+    function playShootSoundWebAudio() {
+      // Odtwarzaj tylko, jeśli Web Audio API jest w pełni gotowe
+      if (webAudioReady) { 
+        const source = audioContext.createBufferSource();
+        source.buffer = shootSoundBuffer;
+        source.connect(audioContext.destination);
+        source.start(0);
+      } else {
+        console.warn("Dźwięk strzału nie jest jeszcze gotowy do odtworzenia.");
+      }
+    }
+    // --- Koniec Web Audio API ---
+
+
+    const resetGame = () => {
+      playerSize = 48;
+      playerX = canvas.width / 2 - playerSize / 2;
+      playerY = canvas.height - playerSize - 2;
+      score = 0;
+      lives = 3;
+      megaShots = 2;
+      gameOver = false;
+      bullets = [];
+      enemies = [];
+      escapedEnemies = 0;
+
+      document.getElementById("score").textContent = score;
+      document.getElementById("lives").textContent = lives;
+      document.getElementById("mega").textContent = megaShots;
+      document.getElementById("newGameBtn").style.display = "none";
+    };
+
+    resetGame();
+
+    function drawPlayer() {
+      ctx.drawImage(shipImage, playerX, playerY, playerSize, playerSize);
+    }
+
+    function drawEnemy(e) {
+      ctx.drawImage(shipImage, e.x, e.y, e.size, e.size);
+    }
+
+    function drawBullet(b) {
+      ctx.fillStyle = b.isMega ? "red" : "white";
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+
+    function spawnEnemy() {
+      if (gameOver) return;
+      let size = 48;
+      let x = Math.random() * (canvas.width - size);
+      enemies.push({ x: x, y: -size, size: size });
+    }
+
+    function shootBullet() {
+      if (gameOver) return;
+      playShootSoundWebAudio(); // Używamy Web Audio API
+
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          bullets.push({
+            x: playerX + playerSize / 2 - 2,
+            y: playerY,
+            w: 4,
+            h: 10,
+            speed: 6,
+            isMega: false
+          });
+        }, i * 100);
+      }
+    }
+
+    function shootMegaBullet() {
+      if (megaShots <= 0 || gameOver) return;
+      megaShots--;
+      document.getElementById("mega").textContent = megaShots;
+
+      playShootSoundWebAudio(); // Mega wystrzał też używa Web Audio API
+
+      const numBullets = 25;
+      const spread = 1.2;
+      for (let i = 0; i < numBullets; i++) {
+        const angle = (-spread / 2) + (spread * (i / (numBullets - 1)));
+        bullets.push({
+          x: playerX + playerSize / 2,
+          y: playerY,
+          w: 4,
+          h: 12,
+          speed: 8,
+          dx: Math.sin(angle) * 5,
+          dy: -Math.cos(angle) * 8,
+          isMega: true
+        });
+      }
+    }
+
+    let touchStartX = null;
+    let holdTimer = null;
+
+    canvas.addEventListener("touchstart", async function (e) {
+      // Inicjalizacja dźwięków przy pierwszej interakcji
+      if (!webAudioReady) { // Sprawdź tylko gotowość Web Audio API
+        try {
+          // Upewnij się, że kontekst jest utworzony i wznowiony przed ładowaniem
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          if (audioContext.state === 'suspended') {
+              await audioContext.resume();
+          }
+          
+          shootSoundBuffer = await loadAudio("https://johntaronites.github.io/Shooter_AI/laser_shoot.wav");
+          webAudioReady = true; // Web Audio API jest gotowe po załadowaniu bufora
+          console.log("Dźwięk strzału załadowany i Web Audio API gotowe.");
+        } catch (error) {
+          console.error("Błąd inicjalizacji Web Audio API lub ładowania dźwięku strzału:", error);
+        }
+      }
+
+      if (!htmlAudioReady) { // Sprawdź tylko gotowość HTML Audio
+        // Inicjalizujemy crashSound (HTML Audio), wyciszając go na czas inicjalizacji
+        crashSound.volume = 0; 
+        crashSound.play().then(() => {
+            crashSound.pause();
+            crashSound.currentTime = 0;
+            crashSound.volume = 1; 
+            htmlAudioReady = true; // HTML Audio jest gotowe
+            console.log("HTML Audio (crashSound) zainicjalizowany.");
+        }).catch(error => {
+            console.warn("Problem z inicjalizacją crashSound (może być już zainicjalizowany lub blokowany):", error);
+        });
+      }
+
+      if (gameOver) return;
+      touchStartX = e.touches[0].clientX;
+      const touchX = e.touches[0].clientX;
+
+      if (Math.abs(touchX - playerX - playerSize / 2) > 10) {
+        playerX = touchX - playerSize / 2;
+        playerX = Math.max(0, Math.min(playerX, canvas.width - playerSize));
+      }
+
+      holdTimer = setTimeout(() => {
+        shootMegaBullet();
+        holdTimer = null;
+      }, 1000);
+    });
+
+    canvas.addEventListener("touchend", function () {
+      if (gameOver) return;
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        shootBullet();
+        holdTimer = null;
+      }
+    });
+
+    canvas.addEventListener("touchmove", function (e) {
+      if (gameOver) return;
+      const touchX = e.touches[0].clientX;
+      const deltaX = touchX - touchStartX;
+      playerX += deltaX;
+      playerX = Math.max(0, Math.min(playerX, canvas.width - playerSize));
+      touchStartX = touchX;
+    });
+
+    function updateGame() {
+      if (gameOver) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPlayer();
+
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        let b = bullets[i];
+        if (b.isMega) {
+          b.x += b.dx;
+          b.y += b.dy;
+        } else {
+          b.y -= b.speed;
+        }
+        drawBullet(b);
+        if (b.y < -20 || b.x < -10 || b.x > canvas.width + 10) bullets.splice(i, 1);
+      }
+
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        let e = enemies[i];
+        e.y += 2;
+        drawEnemy(e);
+
+        for (let j = bullets.length - 1; j >= 0; j--) {
+          let b = bullets[j];
+          if (
+            b.x < e.x + e.size &&
+            b.x + b.w > e.x &&
+            b.y < e.y + e.size &&
+            b.y + b.h > e.y
+          ) {
+            enemies.splice(i, 1);
+            if (!b.isMega) bullets.splice(j, 1);
+            score++;
+            document.getElementById("score").textContent = score;
+            break;
+          }
+        }
+
+        if (e.y > canvas.height) {
+          enemies.splice(i, 1);
+          escapedEnemies++;
+          if (escapedEnemies >= 3) {
+            escapedEnemies = 0;
+            lives--;
+            // Odtwarzanie crashSound (HTML Audio)
+            crashSound.currentTime = 0;
+            crashSound.play();
+            document.getElementById("lives").textContent = lives;
+            if (lives <= 0) {
+              gameOver = true;
+              setTimeout(() => {
+                ctx.fillStyle = "white";
+                ctx.font = "32px sans-serif";
+                ctx.fillText("😢 Game Over", canvas.width / 2 - 100, canvas.height / 2);
+                document.getElementById("newGameBtn").style.display = "block";
+              }, 200);
+            }
+          }
+        }
+      }
+    }
+
+    function restartGame() {
+      resetGame();
+    }
+
+    setInterval(updateGame, 1000 / 60);
+    setInterval(spawnEnemy, 1200);
+  </script>
+</body>
+</html>
