@@ -3,19 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Kosmiczny Strzelec 1.09</title>
+  <title>Kosmiczny Strzelec 1.11</title>
   <style>
-    body {
+    html, body {
       margin: 0;
+      padding: 0;
       background: black;
       color: white;
       font-family: sans-serif;
-      user-select: none; /* Zapobiega zaznaczaniu tekstu */
-      -webkit-user-select: none; /* Dla przeglądarek WebKit (Chrome, Safari) */
-      -moz-user-select: none; /* Dla Firefox */
-      -ms-user-select: none; /* Dla Internet Explorer/Edge */
-      -webkit-touch-callout: none; /* Zapobiega wyświetlaniu menu kontekstowego na iOS */
-      position: relative;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      -webkit-touch-callout: none;
+      height: 100%;
+      overflow: hidden;
     }
 
     canvas {
@@ -26,9 +28,15 @@
     }
 
     #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
       text-align: center;
-      margin-top: 5px;
       font-size: 16px;
+      padding: 8px 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 10;
     }
 
     #newGameBtn {
@@ -43,16 +51,14 @@
       position: absolute;
       left: 50%;
       transform: translateX(-50%);
-      top: calc(50% + 40px);
-      z-index: 10;
+      top: 60%;
+      z-index: 20;
     }
   </style>
 </head>
 <body>
   <div id="hud">
-    <div>
-      Wynik: <span id="score">0</span> | Życia: <span id="lives">3</span> | Mega Wystrzały: <span id="mega">2</span>
-    </div>
+    Wynik: <span id="score">0</span> | Życia: <span id="lives">3</span> | Mega Wystrzały: <span id="mega">2</span>
   </div>
 
   <canvas id="gameCanvas" width="400" height="700"></canvas>
@@ -63,7 +69,7 @@
   <script>
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
-    
+
     const crashSound = document.getElementById("crashSound");
 
     const shipImage = new Image();
@@ -73,22 +79,19 @@
     let score, lives, megaShots, gameOver;
     let bullets, enemies, escapedEnemies;
 
-    // Używamy osobnych flag dla klarowności
-    let webAudioReady = false; // Czy Web Audio API (dla strzału) jest gotowe
-    let htmlAudioReady = false; // Czy HTML Audio (dla crashSound) jest gotowe
+    let webAudioReady = false;
+    let htmlAudioReady = false;
+    let isFirstTouchDone = false;
 
-    // --- Web Audio API dla dźwięku strzału ---
-    let audioContext = null; // Inicjalizujemy jako null
-    let shootSoundBuffer = null; 
+    let audioContext = null;
+    let shootSoundBuffer = null;
 
     async function loadAudio(url) {
-      // Funkcja tworząca/wznawiająca kontekst audio
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
       if (audioContext.state === 'suspended') {
-          await audioContext.resume(); // Kluczowe dla aktywacji kontekstu
-          console.log("AudioContext wznowiony.");
+        await audioContext.resume();
       }
 
       const response = await fetch(url);
@@ -96,20 +99,14 @@
       return await audioContext.decodeAudioData(arrayBuffer);
     }
 
-    // Funkcja do odtwarzania dźwięku strzału za pomocą Web Audio API
     function playShootSoundWebAudio() {
-      // Odtwarzaj tylko, jeśli Web Audio API jest w pełni gotowe
-      if (webAudioReady) { 
+      if (webAudioReady) {
         const source = audioContext.createBufferSource();
         source.buffer = shootSoundBuffer;
         source.connect(audioContext.destination);
         source.start(0);
-      } else {
-        console.warn("Dźwięk strzału nie jest jeszcze gotowy do odtworzenia.");
       }
     }
-    // --- Koniec Web Audio API ---
-
 
     const resetGame = () => {
       playerSize = 48;
@@ -153,8 +150,7 @@
 
     function shootBullet() {
       if (gameOver) return;
-      playShootSoundWebAudio(); // Używamy Web Audio API
-
+      playShootSoundWebAudio();
       for (let i = 0; i < 3; i++) {
         setTimeout(() => {
           bullets.push({
@@ -173,9 +169,7 @@
       if (megaShots <= 0 || gameOver) return;
       megaShots--;
       document.getElementById("mega").textContent = megaShots;
-
-      playShootSoundWebAudio(); // Mega wystrzał też używa Web Audio API
-
+      playShootSoundWebAudio();
       const numBullets = 25;
       const spread = 1.2;
       for (let i = 0; i < numBullets; i++) {
@@ -197,40 +191,39 @@
     let holdTimer = null;
 
     canvas.addEventListener("touchstart", async function (e) {
-      // Inicjalizacja dźwięków przy pierwszej interakcji
-      if (!webAudioReady) { // Sprawdź tylko gotowość Web Audio API
-        try {
-          // Upewnij się, że kontekst jest utworzony i wznowiony przed ładowaniem
-          audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          if (audioContext.state === 'suspended') {
-              await audioContext.resume();
-          }
-          
-          shootSoundBuffer = await loadAudio("https://johntaronites.github.io/Shooter_AI/laser_shoot.wav");
-          webAudioReady = true; // Web Audio API jest gotowe po załadowaniu bufora
-          console.log("Dźwięk strzału załadowany i Web Audio API gotowe.");
-        } catch (error) {
-          console.error("Błąd inicjalizacji Web Audio API lub ładowania dźwięku strzału:", error);
-        }
-      }
+      const touchX = e.touches[0].clientX;
 
-      if (!htmlAudioReady) { // Sprawdź tylko gotowość HTML Audio
-        // Inicjalizujemy crashSound (HTML Audio), wyciszając go na czas inicjalizacji
-        crashSound.volume = 0; 
+      if (!webAudioReady || !htmlAudioReady) {
+        try {
+          if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          if (audioContext.state === 'suspended') await audioContext.resume();
+          shootSoundBuffer = await loadAudio("https://johntaronites.github.io/Shooter_AI/laser_shoot.wav");
+          webAudioReady = true;
+        } catch (err) {
+          console.error("Błąd WebAudio:", err);
+        }
+
+        crashSound.volume = 0;
         crashSound.play().then(() => {
-            crashSound.pause();
-            crashSound.currentTime = 0;
-            crashSound.volume = 1; 
-            htmlAudioReady = true; // HTML Audio jest gotowe
-            console.log("HTML Audio (crashSound) zainicjalizowany.");
-        }).catch(error => {
-            console.warn("Problem z inicjalizacją crashSound (może być już zainicjalizowany lub blokowany):", error);
+          crashSound.pause();
+          crashSound.currentTime = 0;
+          crashSound.volume = 1;
+          htmlAudioReady = true;
+        }).catch(e => {
+          console.warn("crashSound init issue:", e);
         });
       }
 
+      if (!isFirstTouchDone) {
+        isFirstTouchDone = true;
+        return; // nie rób nic więcej na pierwsze kliknięcie
+      }
+
       if (gameOver) return;
-      touchStartX = e.touches[0].clientX;
-      const touchX = e.touches[0].clientX;
+
+      touchStartX = touchX;
 
       if (Math.abs(touchX - playerX - playerSize / 2) > 10) {
         playerX = touchX - playerSize / 2;
@@ -244,7 +237,8 @@
     });
 
     canvas.addEventListener("touchend", function () {
-      if (gameOver) return;
+      if (gameOver || !isFirstTouchDone) return;
+
       if (holdTimer) {
         clearTimeout(holdTimer);
         shootBullet();
@@ -253,7 +247,7 @@
     });
 
     canvas.addEventListener("touchmove", function (e) {
-      if (gameOver) return;
+      if (gameOver || !isFirstTouchDone) return;
       const touchX = e.touches[0].clientX;
       const deltaX = touchX - touchStartX;
       playerX += deltaX;
@@ -306,7 +300,6 @@
           if (escapedEnemies >= 3) {
             escapedEnemies = 0;
             lives--;
-            // Odtwarzanie crashSound (HTML Audio)
             crashSound.currentTime = 0;
             crashSound.play();
             document.getElementById("lives").textContent = lives;
